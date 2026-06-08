@@ -21,9 +21,9 @@ export function Dashboard() {
   const [coupling, setCoupling] = useState<CouplingPair[]>([]);
   const [ownership, setOwnership] = useState<{ files: OwnershipFile[]; authors: AuthorSummary[] }>({ files: [], authors: [] });
 
-  const connect = useCallback(async (url: string) => {
+  const connect = useCallback(async (url: string, token?: string) => {
     setError(null); setSnapshot(null);
-    try { setRepo(await api.connectRepository(url)); }
+    try { setRepo(await api.connectRepository(url, token)); }
     catch (e: any) { setError(e.message); }
   }, []);
 

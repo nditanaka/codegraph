@@ -12,11 +12,11 @@ async function get<T>(path: string): Promise<T> {
 }
 
 export const api = {
-  async connectRepository(url: string, name?: string): Promise<Repository> {
+  async connectRepository(url: string, token?: string, name?: string): Promise<Repository> {
     const res = await fetch(`${BASE}/api/repositories`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, name })
+      body: JSON.stringify({ url, name, token })
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || 'Failed to connect repository');
