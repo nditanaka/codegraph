@@ -105,7 +105,30 @@ function getFileSizes(db, snapshotId) {
   return map;
 }
 
+
+function transaction(db, fn) {
+  db.exec('BEGIN');
+  try {
+    const result = fn();
+    db.exec('COMMIT');
+    return result;
+  } catch (err) {
+    try { db.exec('ROLLBACK'); } catch { /* noop */ }
+    throw err;
+  }
+}
+
+// Persist a whole snapshot's data in ONE transaction (R4DBMS / performance).
+function insertSnapshotData(db, snapshotId, { commits, fileChanges, fileSizes }) {
+  transaction(db, () => {
+    insertCommits(db, snapshotId, commits);
+    insertFileChanges(db, snapshotId, fileChanges);
+    insertFileSizes(db, snapshotId, fileSizes);
+  });
+}
+
 module.exports = {
+  transaction, insertSnapshotData,
   now,
   createRepository, getRepository, getRepositoryByUrl, listRepositories, setRepositoryStatus,
   createSnapshot, finalizeSnapshot, listSnapshots, getSnapshot,

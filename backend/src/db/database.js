@@ -1,19 +1,16 @@
 'use strict';
-const fs = require('fs');
-const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
-
-const SCHEMA = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
+const { migrate } = require('./migrations');
 
 /**
- * Open (or create) a SQLite database and apply the schema. Pass ':memory:' for
- * an ephemeral database, which the test suite uses for isolation.
+ * Open (or create) a SQLite database and bring it to the latest schema version
+ * via transaction-safe migrations. Pass ':memory:' for an ephemeral database.
  * @param {string} dbPath
  * @returns {import('node:sqlite').DatabaseSync}
  */
 function openDatabase(dbPath) {
   const db = new DatabaseSync(dbPath);
-  db.exec(SCHEMA);
+  migrate(db);
   return db;
 }
 
