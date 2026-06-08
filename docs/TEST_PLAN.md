@@ -62,6 +62,14 @@ notation (`{old => new}` and `old => new`); binary files (`-` line counts);
 exact threshold boundary for single-owner (share = 0.80); pruning of sweeping
 commits; empty previous snapshot in comparison.
 
+
+## 6.1 v2.1 security & resilience tests
+The hardening pass added dedicated tests for each risk mitigation: URL
+validation and PAT handling (`validation.test.js`), the serial job queue
+(`queue.test.js`), transactional versioned migrations (`migrations.test.js`),
+and size-limit/transaction-rollback/pagination/concurrency behavior
+(`integration/hardening.test.js`). Total automated tests: 91.
+
 ## 5. Scope / out of scope
 In scope: analysis correctness, API contract, component rendering, primary user
 flow. Out of scope (documented future work): load/performance testing at

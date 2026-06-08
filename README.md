@@ -1,6 +1,6 @@
 # Codegraph — Git Repository Health Analyzer
 
-CISC 594-90: Testing Principles · Version 2.0.0
+CISC 594-90: Testing Principles · Version 2.1.0
 
 Codegraph mines a Git repository's version-control history and turns it into
 actionable health insights: code churn, hotspots, hidden temporal coupling,
@@ -53,9 +53,9 @@ cd frontend && npm install && npm run dev
 ## Testing
 
 ```bash
-cd backend  && npm test            # 52 unit + integration tests (Jest)
+cd backend  && npm test            # 70 unit + integration tests (Jest)
 cd backend  && npm run test:coverage
-cd frontend && npm test            # 19 component tests (Vitest)
+cd frontend && npm test            # 21 component tests (Vitest)
 cd frontend && npm run e2e         # Playwright end-to-end (needs browsers + servers)
 ```
 

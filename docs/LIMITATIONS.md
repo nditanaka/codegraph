@@ -1,98 +1,62 @@
 # Known Limitations & Scaling Characteristics
 
-This document records the current limits of Codegraph v2.0.0, why they exist,
-and how they map to the project risk register. It is intentionally candid: most
-of these are acceptable trade-offs for a self-hosted analysis tool but matter at
-scale or in production.
+Codegraph v2.1.0. This document is kept honest and current: it lists what the
+system does *not* do, after the v2.1 hardening pass that closed several earlier
+gaps. It complements the risk register (`RISK_REGISTER.md`).
 
 ## Reference datapoint
-The only measured run is the demo: **1,102 commits / 817 files analyzed in
-~1.3 s** against `trekhleb/javascript-algorithms`. All thresholds below are
-engineering estimates derived from the implementation, not separately
-benchmarked.
+Measured run: **1,102 commits / 817 files in ~1.3 s** against
+`trekhleb/javascript-algorithms`. Thresholds below are engineering estimates.
 
-## 1. In-memory, single-threaded pipeline
-The entire analysis runs in one Node process on the main thread:
-- `git log --numstat` output is loaded into a single string and parsed into
-  arrays holding **every commit and every file change at once**.
-- At ~100k+ commits these structures can reach hundreds of MB and pressure
-  Node's heap.
-- Because analysis is not offloaded to a worker, the server is effectively busy
-  for the duration of a run; many concurrent analyses would contend.
+## Resolved in v2.1 (previously listed as limitations)
+- **Bulk inserts are now transactional** (`dao.insertSnapshotData`) — no longer
+  one fsync per row.
+- **Repository size limit is now enforced** — pre-clone free-space check and
+  post-clone size check against `config.maxRepoSizeMb`, with graceful failure.
+- **Private-repo PAT input** is supported (validated, ephemeral, https-only).
+- **Server-side pagination + top-250 hotspot cap** bound API payloads.
+- **Concurrency** is handled by an in-process serial queue plus SQLite WAL mode.
+- **URL validation** whitelists protocols and rejects shell metacharacters.
+- **Schema changes** go through versioned, transactional migrations.
 
-**Comfortable range:** up to roughly the low tens of thousands of commits and a
-few thousand files. (Risk register: R1, R2.)
+## Remaining limitations
 
-## 2. Database inserts are not batched in a transaction
-`dao.insertCommits / insertFileChanges / insertFileSizes` execute one prepared
-statement per row. Storage time grows linearly and becomes the dominant cost
-well before the analysis algorithms do.
+### 1. Single-node, in-memory job queue
+The `SerialQueue` serializes work within one process. It is **not** a distributed
+broker — multiple backend instances would each have their own queue. True
+multi-node throughput would require an external broker (e.g. Redis/Bull).
 
-**Impact:** the first bottleneck on large repositories.
-**Planned fix:** wrap each bulk insert in a single transaction
-(`BEGIN … COMMIT`) — typically a 5x–50x write speedup.
+### 2. Full clone is required (by design)
+Line-level churn, temporal coupling, and ownership need complete history, so we
+do **not** use `--depth` shallow clones (which would corrupt those metrics).
+Very large histories are bounded by the size cap, not by truncation; an
+extremely large in-scope repo will still be limited by disk/memory for the clone.
 
-## 3. `getFileSizes` reads every tracked file synchronously
-The hotspot complexity proxy counts lines by reading each tracked file from disk
-synchronously. Repos with tens of thousands of files, or with large/binary
-files, slow this step significantly and block the event loop. Binary files are
-handled (recorded as size 0) but are still opened.
+### 3. In-memory analysis
+The git log is parsed into in-memory arrays. Comfortable up to roughly the low
+tens of thousands of commits; 100k+ commits will pressure Node's heap. Streaming
+/ incremental analysis is future work.
 
-## 4. Temporal coupling is shape-sensitive
-Coupling is O(files²) **per commit**. It is mitigated by:
-- skipping commits that touch more than `maxFilesPerCommit` (default 50), and
-- pruning pairs below `minSharedCommits` (default 2).
+### 4. `getFileSizes` reads files synchronously
+The hotspot complexity proxy reads each tracked file to count lines. Tens of
+thousands of files, or large binaries, slow this step.
 
-Repositories with many medium-sized commits (lots of 20–50-file commits)
-generate the most candidate pairs and the most memory use. (Risk register: R2.)
+### 5. Metric modelling
+- Complexity proxy is **lines of code**, not language-aware cyclomatic
+  complexity, so large-but-simple files (e.g. `package-lock.json`) can rank high.
+- Author identity is by email; no `.mailmap` aliasing.
+- "Abandoned" is relative to the repo's latest commit, not wall-clock today.
 
-## 5. Repository size limit is configured but NOT enforced
-`config.maxRepoSizeMb` (default 500) exists as a setting, but the pipeline does
-**not** currently check it before cloning. There is no hard cutoff stopping a
-very large clone; the practical limit is your machine's disk and memory.
+### 6. Platform
+- **Node 22+** required; `node:sqlite` is still flagged experimental.
+- Merge commits are excluded (`--no-merges`).
+- Playwright E2E specs require browser binaries (`npx playwright install`) and
+  both servers running.
 
-**Planned fix:** enforce the size check after clone (or via
-`git rev-list --disk-usage`) and fail fast with a clear error.
-
-## 6. Private repositories: no token input
-The REST API does not accept a GitHub Personal Access Token. Cloning relies on
-whatever git credentials the host environment already has (SSH key, credential
-helper, or a cached token). The original proposal described PAT input, which is
-not yet wired into the clone step.
-
-## 7. No server-side pagination
-Analysis endpoints (churn, hotspots, ownership) return the full result arrays.
-For very large repositories this produces large JSON payloads and large client
-renders. The UI tables/lists cap display counts, but the API responses are not
-paginated.
-
-## 8. Platform / runtime
-- **Node 22+ required** — the backend uses Node's built-in `node:sqlite`, which
-  is still flagged *experimental* (a warning is emitted, silenced in test
-  scripts via `NODE_NO_WARNINGS`). API stability is not guaranteed across Node
-  versions until it is marked stable.
-- **`--no-merges`** — merge commits are excluded from analysis. This keeps churn
-  and coupling focused on direct edits, but squash/merge-heavy workflows will
-  show different numbers than rebase/linear workflows.
-
-## 9. Metric modelling caveats
-- **Complexity proxy = lines of code.** Large-but-simple files (e.g.
-  `package-lock.json`, which topped the demo hotspot list) can rank as hotspots.
-  A language-aware cyclomatic-complexity measure would reduce false positives.
-- **Author identity = email (fallback name).** A contributor who commits under
-  multiple emails is counted as multiple authors; no `.mailmap` resolution.
-- **"Abandoned"** is relative to the repository's most recent commit, not
-  wall-clock today, so a repo whose latest commits are old dependency bumps can
-  flag most files as abandoned.
-
-## Summary: what won't work well
+## Summary
 | Scenario | Effect |
 |---|---|
-| 100k+ commits | High memory + slow inserts; may exhaust heap |
-| Tens of thousands of files | Slow `getFileSizes`; large clones |
-| Many concurrent analyses | Main-thread contention; degraded responsiveness |
-| Repos requiring a PAT to clone | Not supported via the API |
-| Very large repos relying on the size limit | Limit is not enforced (no cutoff) |
-
-Items 2, 5, and 6 are the highest-value follow-ups and would bring the
-implementation fully in line with the proposal.
+| 100k+ commits | Heap pressure (in-memory parse) |
+| Tens of thousands of files | Slow `getFileSizes` |
+| Multi-node deployment | Per-process queues (no shared broker) |
+| Repo larger than size cap | Rejected with a clear error (by design) |
